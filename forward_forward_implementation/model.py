@@ -52,7 +52,7 @@ class FF(nn.Module):
 
         # hidden layers
         self.layers = [nn.Sequential(nn.Linear(input_size, hidden_size), nn.ReLU())]
-        for i in range(num_hidden):
+        for i in range(num_hidden-1):
             stack = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.ReLU())
             self.layers.append(stack)
 
@@ -60,7 +60,7 @@ class FF(nn.Module):
 
         # layer for labeling (uses last 3 hidden layers)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.softmax = nn.Sequential(nn.Linear(hidden_size, output_size), nn.Softmax(10))
+        self.softmax = nn.Sequential(nn.Linear(3*hidden_size, output_size), nn.Softmax(dim=1))
 
         self.optimizer = torch.optim.SGD(self.parameters(), lr=lr)
         self.goodness_fn = goodness
@@ -114,8 +114,6 @@ class FF(nn.Module):
         size = len(dataloader.dataset) #number of samples
         train_loss = 0
         for batch, (X, y) in enumerate(dataloader):
-            print("asdf")
-            print(y.shape)
             loss = self._train(X, y, sign=1)
             # loss = self.loss_fn(pred, y)
 
@@ -155,4 +153,5 @@ if __name__ == "__main__":
 
     net = FF()
     train_loss = net.train(train_loader)
-
+    net.test(valid_loader)
+    net.test(test_loader)

@@ -2,21 +2,21 @@ import os
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, random_split
-from torch import torchvision
-from torch.torchvision import transforms
+import torchvision
+from torchvision import transforms
 from tqdm import tqdm
 
 # parameters
 root="./data/"
-input_size = 10
-hidden_size = 5
-output_size = 1
-num_hidden = 2
+input_size = 28*28
+hidden_size = 200
+output_size = 10
+num_hidden = 4
 # end parameters
 
 # hyperparameters
 batch_size = 4
-epochs = 5
+epochs = 100
 lr = 1e-3
 # end hyperparameters
 
@@ -49,30 +49,40 @@ class FF(nn.Module):
     def __init__(self):
         super().__init__()
         self.flatten = nn.Flatten()
-        self.layers = [nn.Sequential(nn.Linear(28*28, 512), nn.ReLU())]
+
+        # hidden layers
+        self.layers = [nn.Sequential(nn.Linear(input_size, hidden_size), nn.ReLU())]
         for i in range(num_hidden):
-            stack = nn.Sequential(nn.Linear(512, 512), nn.ReLU())
+            stack = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.ReLU())
             self.layers.append(stack)
-        self.layers.append(nn.Linear(512, 10))
 
-        self.norm = nn.LayerNorm(512)
+        self.norm = nn.LayerNorm(hidden_size)
 
+        # layer for labeling (uses last 3 hidden layers)
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.parameters(), lr=lr)
+        self.softmax = nn.Sequential(nn.Linear(hidden_size, output_size), nn.Softmax(10))
 
+        self.optimizer = torch.optim.SGD(self.parameters(), lr=lr)
         self.goodness_fn = goodness
 
 
     def forward(self, x):
         x = self.flatten(x)
-        for layer in self.layers:
-            x = self.norm(layer(x))
+        label_layers = []
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+            x = self.norm(x)
+            if i != 0:
+                label_layers.append(x)
+        full_label_layer = torch.cat(label_layers, dim=1)
+        probs = self.softmax(full_label_layer)
+        return torch.argmax(probs)
 
-        return x
-
-    def _train(self, x, sign):
+    def _train(self, x, y, sign):
         x = self.flatten(x)
-        for layer in self.layers[:-1]:
+
+        label_layers = []
+        for i, layer in enumerate(self.layers):
             activations = layer(x)
 
             # if sign == 1, maximize goodness
@@ -83,21 +93,31 @@ class FF(nn.Module):
             g.backward()
             self.optimizer.step()
 
-            x = self.norm(x)
+            x = self.norm(activations)
+            x = x.detach()
+            if i != 0:
+                label_layers.append(x)
 
-        logits = self.layers[-1](x)
-        return logits
+        # for i in range(len(label_layers)):
+        #     label_layers[i] = label_layers[i].detach()
+
+        full_label_layer = torch.cat(label_layers, dim=1)
+        probs = self.softmax(full_label_layer)
+        loss = self.loss_fn(probs, y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss
 
     def train(self, dataloader):
         size = len(dataloader.dataset) #number of samples
         train_loss = 0
         for batch, (X, y) in enumerate(dataloader):
-            pred = self(X)
-            loss = self.loss_fn(pred, y)
-
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+            print("asdf")
+            print(y.shape)
+            loss = self._train(X, y, sign=1)
+            # loss = self.loss_fn(pred, y)
 
             train_loss += loss.item()
             if batch % 10 == 0:
@@ -133,6 +153,6 @@ class FF(nn.Module):
 if __name__ == "__main__":
     torch.manual_seed(0)
 
-    net = TestNN()
+    net = FF()
     train_loss = net.train(train_loader)
 

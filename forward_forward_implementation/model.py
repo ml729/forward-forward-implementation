@@ -76,7 +76,11 @@ class FF(nn.Module):
                 label_layers.append(x)
         full_label_layer = torch.cat(label_layers, dim=1)
         probs = self.softmax(full_label_layer)
-        return torch.argmax(probs)
+        return probs
+
+    def predict(self, x):
+        probs = self(x)
+        return probs.argmax(1)
 
     def _train(self, x, y, sign):
         x = self.flatten(x)
@@ -125,7 +129,7 @@ class FF(nn.Module):
 
         return train_loss
 
-    def test(self, dataloader):
+    def test(self, dataloader, name="Test"):
         size = len(dataloader.dataset)
         num_batches = len(dataloader)
         test_loss, correct = 0, 0
@@ -133,13 +137,13 @@ class FF(nn.Module):
 
         with torch.no_grad():
             for X, y in dataloader:
-                pred = self(X)
-                test_loss += self.loss_fn(pred, y).item()
-                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+                probs = self(X)
+                test_loss += self.loss_fn(probs, y).item()
+                correct += (probs.argmax(1) == y).type(torch.float).sum().item()
 
         test_loss /= num_batches
         correct /= size
-        print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+        print(f"{name} Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
         return test_loss, correct
 
 
@@ -153,5 +157,5 @@ if __name__ == "__main__":
 
     net = FF()
     train_loss = net.train(train_loader)
-    net.test(valid_loader)
+    net.test(valid_loader, "Validation")
     net.test(test_loader)

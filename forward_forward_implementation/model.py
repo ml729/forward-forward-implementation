@@ -22,7 +22,7 @@ num_hidden = 4
 # hyperparameters
 batch_size = 4
 epochs = 100
-lr = 1e-3
+lr = 1e-1
 # end hyperparameters
 
 
@@ -162,6 +162,8 @@ class FF(nn.Module):
         return probs.argmax(1)
 
     def _train(self, pos_x, neg_x):
+        avg_good = 0
+        avg_bad = 0
         for x, sign in zip((pos_x, neg_x), (1, -1)):
             x = self.flatten(x)
 
@@ -171,7 +173,12 @@ class FF(nn.Module):
 
                 # if sign == 1, maximize goodness
                 # if sign == -1, minimize goodness
-                g = -1 * sign * self.goodness_fn(activations)
+                goodness = self.goodness_fn(activations)
+                g = -1 * sign * goodness
+                if sign == 1:
+                    avg_good += goodness
+                else:
+                    avg_bad += goodness
 
                 self.optimizer.zero_grad()
                 g.backward()
@@ -181,6 +188,9 @@ class FF(nn.Module):
                 x = x.detach()
                 if i != 0:
                     label_layers.append(x)
+        avg_good /= len(self.layers)
+        avg_bad /= len(self.layers)
+        return avg_good, avg_bad
 
         # for i in range(len(label_layers)):
         #     label_layers[i] = label_layers[i].detach()
@@ -215,18 +225,36 @@ class FF(nn.Module):
         print("Running Forward-Forward")
         size = len(dataloader.dataset) #number of samples
         train_loss = 0
+        train_good = 0
+        train_bad = 0
+        # for batch, (X, y) in enumerate(dataloader):
+        #     self._train(X)
+        #     # loss = self.loss_fn(pred, y)
+
+        #     # train_loss += loss.item()
+        #     if batch % 10 == 0:
+        #         # loss = loss.item()
+        #         current = (batch+1) * len(X) # (len(X) is the batch size)
+        #         print(f"[{current:>5d}/{size:>5d}]")
+
+
         for batch, ((X, y), neg_X) in enumerate(zip(dataloader, negative_dataloader)):
-            self._train(X, neg_X)
+            goodness, badness = self._train(X, neg_X)
             # loss = self.loss_fn(pred, y)
+            train_good += goodness
+            train_bad += badness
 
             # train_loss += loss.item()
             if batch % 10 == 0:
                 # loss = loss.item()
+                goodness = goodness
+                badness = badness
                 current = (batch+1) * len(X) # (len(X) is the batch size)
-                # print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
+                print(f"good: {goodness:>7f}, bad: {badness:>7f} [Training samples: {current:>5d}/{size:>5d}]")
 
+
+        print("Training softmax layer")
         for batch, (X, y) in enumerate(dataloader):
-            print("Training softmax layer")
             loss = self._train_softmax(X, y)
 
             train_loss += loss.item()

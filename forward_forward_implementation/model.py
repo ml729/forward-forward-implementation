@@ -22,7 +22,8 @@ num_hidden = 4
 # hyperparameters
 batch_size = 4
 epochs = 100
-lr = 1e-1
+lr = 1e-2
+soft_lr = 1e-2
 # end hyperparameters
 
 
@@ -44,8 +45,6 @@ valid_loader = torch.utils.data.DataLoader(valid_set, batch_size=batch_size, shu
 test_set = torchvision.datasets.MNIST(root=root, train=False, download=True, transform=transform)
 test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=2)
 
-def goodness(a):
-    return (a**2).sum()
 
 # Create negative data
 
@@ -122,6 +121,8 @@ def get_negative_loader():
     return negative_train_loader
 
 
+def square_goodness(a):
+    return torch.sum(a**2)
 
 
 class FF(nn.Module):
@@ -134,15 +135,27 @@ class FF(nn.Module):
         for i in range(num_hidden-1):
             stack = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.ReLU())
             self.layers.append(stack)
+        self.layers = nn.ModuleList(self.layers) # without this, self.layers' layers are not in self.parameters()
 
-        self.norm = nn.LayerNorm(hidden_size)
+        self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False)
 
         # layer for labeling (uses last 3 hidden layers)
         self.loss_fn = nn.CrossEntropyLoss()
         self.softmax = nn.Sequential(nn.Linear(3*hidden_size, output_size), nn.Softmax(dim=1))
-
+        # for layer in self.layers:
+        #     print("Layer:", layer)
+        #     for param in layer.parameters():
+        #         print("Parameter:", param)
+        # optim_params = [layer.parameters() for layer in self.layers]# + [self.norm.parameters()]
+        # optim_params = list(chain(*optim_params))
+        # print(len(optim_params))
+        # self.optimizer = torch.optim.SGD(optim_params, lr=lr)
+        # print(len(list(self.parameters())))
         self.optimizer = torch.optim.SGD(self.parameters(), lr=lr)
-        self.goodness_fn = goodness
+        self.softmax_optimizer = torch.optim.SGD(self.softmax.parameters(), lr=soft_lr)
+        self.goodness_fn = square_goodness
+
+
 
 
     def forward(self, x):
@@ -174,15 +187,22 @@ class FF(nn.Module):
                 # if sign == 1, maximize goodness
                 # if sign == -1, minimize goodness
                 goodness = self.goodness_fn(activations)
-                g = -1 * sign * goodness
+                loss = torch.sigmoid(-1 * sign * (goodness - 1))
+                # g = -1 * sign * goodness
                 if sign == 1:
                     avg_good += goodness
+                    # if i==0: print(g)
                 else:
                     avg_bad += goodness
 
                 self.optimizer.zero_grad()
-                g.backward()
+                loss.backward()
                 self.optimizer.step()
+                # print(g)
+                # debug: print gradient
+                # print("weight")
+                # print(layer[0].weight.grad)
+                # print(goodness)
 
                 x = self.norm(activations)
                 x = x.detach()
@@ -192,17 +212,6 @@ class FF(nn.Module):
         avg_bad /= len(self.layers)
         return avg_good, avg_bad
 
-        # for i in range(len(label_layers)):
-        #     label_layers[i] = label_layers[i].detach()
-
-        # full_label_layer = torch.cat(label_layers, dim=1)
-        # probs = self.softmax(full_label_layer)
-        # loss = self.loss_fn(probs, y)
-        # self.optimizer.zero_grad()
-        # loss.backward()
-        # self.optimizer.step()
-        # return loss
-        return
 
     def _train_softmax(self, x, y):
         x = self.flatten(x)
@@ -215,9 +224,9 @@ class FF(nn.Module):
         full_label_layer = torch.cat(label_layers, dim=1)
         probs = self.softmax(full_label_layer)
         loss = self.loss_fn(probs, y)
-        self.optimizer.zero_grad()
+        self.softmax_optimizer.zero_grad()
         loss.backward()
-        self.optimizer.step()
+        self.softmax_optimizer.step()
         return loss
 
 
@@ -245,7 +254,7 @@ class FF(nn.Module):
             train_bad += badness
 
             # train_loss += loss.item()
-            if batch % 10 == 0:
+            if batch % 100 == 0:
                 # loss = loss.item()
                 goodness = goodness
                 badness = badness

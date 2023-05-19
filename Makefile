@@ -1,5 +1,3 @@
-.PHONY: requirements
-
 lock:
 	poetry lock
 

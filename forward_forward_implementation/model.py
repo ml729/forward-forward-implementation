@@ -22,8 +22,8 @@ num_hidden = 4
 # hyperparameters
 batch_size = 4
 epochs = 100
-lr = 1e-2
-soft_lr = 1e-2
+lr = 1e-3
+soft_lr = 1e-3
 # end hyperparameters
 
 
@@ -177,37 +177,47 @@ class FF(nn.Module):
     def _train(self, pos_x, neg_x):
         avg_good = 0
         avg_bad = 0
-        for x, sign in zip((pos_x, neg_x), (1, -1)):
-            x = self.flatten(x)
+        # for x, sign in zip((pos_x, neg_x), (1, -1)):
+        pos_x = self.flatten(pos_x)
+        neg_x = self.flatten(neg_x)
 
-            label_layers = []
-            for i, layer in enumerate(self.layers):
-                activations = layer(x)
+        label_layers = []
+        for i, layer in enumerate(self.layers):
+            pos_activations = layer(pos_x)
+            neg_activations = layer(neg_x)
 
-                # if sign == 1, maximize goodness
-                # if sign == -1, minimize goodness
-                goodness = self.goodness_fn(activations)
-                loss = torch.sigmoid(-1 * sign * (goodness - 1))
-                # g = -1 * sign * goodness
-                if sign == 1:
-                    avg_good += goodness
-                    # if i==0: print(g)
-                else:
-                    avg_bad += goodness
+            pos_goodness = self.goodness_fn(pos_activations)
+            neg_goodness = self.goodness_fn(neg_activations)
+            # print(pos_goodness)
+            # print(neg_goodness)
+            # loss = torch.sigmoid(1 - pos_goodness) + torch.sigmoid(neg_goodness - 1)
+            # loss = -torch.nn.functional.logsigmoid(1 -pos_goodness)
+            # loss += -torch.nn.functional.logsigmoid(neg_goodness - 1)
 
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                # print(g)
-                # debug: print gradient
-                # print("weight")
-                # print(layer[0].weight.grad)
-                # print(goodness)
+            loss = -torch.nn.functional.logsigmoid(pos_goodness - 1)
+            loss += -torch.nn.functional.logsigmoid(1 - neg_goodness)
+            avg_good += pos_goodness
+            avg_bad += neg_goodness
+            # g = -1 * sign * goodness
+            # if sign == 1:
+            #     avg_good += goodness
+            #     # if i==0: print(g)
+            # else:
+            #     avg_bad += goodness
 
-                x = self.norm(activations)
-                x = x.detach()
-                if i != 0:
-                    label_layers.append(x)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            # print(g)
+            # debug: print gradient
+            # print("weight")
+            # print(layer[0].weight.grad)
+            # print(goodness)
+
+            pos_x = self.norm(pos_activations)
+            neg_x = self.norm(neg_activations)
+            pos_x = pos_x.detach()
+            neg_x = neg_x.detach()
         avg_good /= len(self.layers)
         avg_bad /= len(self.layers)
         return avg_good, avg_bad
@@ -247,29 +257,32 @@ class FF(nn.Module):
         #         print(f"[{current:>5d}/{size:>5d}]")
 
 
-        for batch, ((X, y), neg_X) in enumerate(zip(dataloader, negative_dataloader)):
-            goodness, badness = self._train(X, neg_X)
-            # loss = self.loss_fn(pred, y)
-            train_good += goodness
-            train_bad += badness
+        for e in range(epochs):
+            for batch, ((X, y), neg_X) in enumerate(zip(dataloader, negative_dataloader)):
+                goodness, badness = self._train(X, neg_X)
+                # loss = self.loss_fn(pred, y)
+                train_good += goodness
+                train_bad += badness
+                # if batch == 5: return
 
-            # train_loss += loss.item()
-            if batch % 100 == 0:
-                # loss = loss.item()
-                goodness = goodness
-                badness = badness
-                current = (batch+1) * len(X) # (len(X) is the batch size)
-                print(f"good: {goodness:>7f}, bad: {badness:>7f} [Training samples: {current:>5d}/{size:>5d}]")
+                # train_loss += loss.item()
+                if batch % 100 == 0:
+                    # loss = loss.item()
+                    goodness = goodness
+                    badness = badness
+                    current = (batch+1) * len(X) # (len(X) is the batch size)
+                    print(f"good: {goodness:>7f}, bad: {badness:>7f} [Training samples: {current:>5d}/{size:>5d}]")
 
 
         print("Training softmax layer")
-        for batch, (X, y) in enumerate(dataloader):
-            loss = self._train_softmax(X, y)
+        for e in range(epochs):
+            for batch, (X, y) in enumerate(dataloader):
+                loss = self._train_softmax(X, y)
 
-            train_loss += loss.item()
-            if batch % 10 == 0:
-                loss = loss.item()
-                current = (batch+1) * len(X) # (len(X) is the batch size)
+                train_loss += loss.item()
+                if batch % 10 == 0:
+                    loss = loss.item()
+                    current = (batch+1) * len(X) # (len(X) is the batch size)
                 print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
 
         return train_loss
